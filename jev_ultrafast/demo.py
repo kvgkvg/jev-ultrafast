@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -120,6 +121,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, RuntimeError, TimeoutError) as error:
             self.send(400, json.dumps({"error": str(error)}))
         except Exception:
+            traceback.print_exc()  # the page only shows a generic message; keep the cause in the server terminal
             self.send(500, json.dumps({"error": "Local demo failed; no automatic retry. Reset to recover."}))
         finally:
             LOCK.release()

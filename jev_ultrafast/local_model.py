@@ -17,12 +17,16 @@ _LOADED = {}
 def load():
     if not _LOADED:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 
         name = os.environ.get("LOCAL_MODEL", "Qwen/Qwen2.5-3B-Instruct")
         device = os.environ.get("LOCAL_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
         tokenizer = AutoTokenizer.from_pretrained(name)
-        model = AutoModelForCausalLM.from_pretrained(name, dtype=torch.bfloat16).to(device).eval()
+        try:
+            model = AutoModelForCausalLM.from_pretrained(name, dtype=torch.bfloat16)
+        except ValueError:  # a VLM such as SmolVLM: used here with text only, no image input
+            model = AutoModelForImageTextToText.from_pretrained(name, dtype=torch.bfloat16)
+        model = model.to(device).eval()
         _LOADED.update(name=name, device=device, tokenizer=tokenizer, model=model)
     return _LOADED
 
@@ -71,7 +75,13 @@ def ask(state, question, goal_line, header):
     )
     user = f"{render(state)}\n\nGoal: {goal_line}\n{rules}\n\n{header}\n{options}\n\nAnswer with the label in brackets."
     chat = [{"role": "system", "content": LOCAL_SYSTEM}, {"role": "user", "content": user}]
-    prompt = load()["tokenizer"].apply_chat_template(chat, tokenize=False, add_generation_prompt=True) + "["
+    tokenizer = load()["tokenizer"]
+    try:
+        prompt = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+    except (TypeError, ValueError):  # VLM templates want content as typed parts
+        parts = [{**m, "content": [{"type": "text", "text": m["content"]}]} for m in chat]
+        prompt = tokenizer.apply_chat_template(parts, tokenize=False, add_generation_prompt=True)
+    prompt += "["
     probabilities = score(prompt, [f"{key}]" for key in criteria])
     probabilities = {key: probabilities[f"{key}]"] for key in criteria}
     choice = max(probabilities, key=probabilities.get)

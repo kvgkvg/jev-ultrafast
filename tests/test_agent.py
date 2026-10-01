@@ -318,3 +318,25 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+def test_local_backend_answers_the_same_contract_and_scores_only_the_chosen_head(monkeypatch):
+    from jev_ultrafast import local_model
+
+    class Tokenizer:
+        def apply_chat_template(self, chat, tokenize, add_generation_prompt):
+            return chat[-1]["content"]
+
+    scored = []
+
+    def score(prompt, labels):
+        scored.append(labels)
+        pick = "CLICK]" if "CLICK]" in labels else "2]"
+        return {label: float(label == pick) for label in labels}
+
+    monkeypatch.setenv("JEV_BACKEND", "local")
+    monkeypatch.setattr(local_model, "load", lambda: {"name": "stub", "tokenizer": Tokenizer()})
+    monkeypatch.setattr(local_model, "score", score)
+    d = model.choose(page(), "Find a book", [])
+    assert d["operation"] == "CLICK" and d["target"] == "2" and d["choice"] == "e3"
+    assert d["model"] == "local:stub" and len(scored) == 2  # operation head + only the chosen target head
